@@ -1,4 +1,11 @@
-// Simple authentication utilities for demo purposes
+import bcrypt from "bcryptjs"
+import CryptoJS from "crypto-js"
+import * as jose from "jose"
+
+const STORAGE_KEY = "user_session"
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-key-replace-in-production"
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || "default-secret-replace-in-production")
+
 export interface User {
   id: string
   email: string
@@ -9,29 +16,34 @@ export interface User {
 // In a real app, this would be a database
 const users: User[] = []
 
-export function createUser(email: string, password: string, name: string): User {
+export async function createUser(email: string, password: string, name: string): Promise<User> {
   const existingUser = users.find((u) => u.email === email)
   if (existingUser) {
     throw new Error("User already exists")
   }
 
+  // Hash password before storing
+  const hashedPassword = await bcrypt.hash(password, 10)
+
   const user: User = {
     id: Date.now().toString(),
     email,
     name,
-    password, // In production, this would be hashed
+    password: hashedPassword,
   }
 
   users.push(user)
-  return { ...user, password: undefined } // Don't return password
+  return { ...user, password: undefined }
 }
 
-export function authenticateUser(email: string, password: string): User | null {
-  const user = users.find((u) => u.email === email && u.password === password)
-  if (user) {
-    return { ...user, password: undefined } // Don't return password
-  }
-  return null
+export async function authenticateUser(email: string, password: string): Promise<User | null> {
+  const user = users.find((u) => u.email === email)
+  if (!user || !user.password) return null
+
+  const isValid = await bcrypt.compare(password, user.password)
+  if (!isValid) return null
+
+  return { ...user, password: undefined }
 }
 
 export function getUserById(id: string): User | null {
@@ -42,22 +54,60 @@ export function getUserById(id: string): User | null {
   return null
 }
 
-// Simple session management using localStorage
-export function setUserSession(user: User) {
-  if (typeof window !== "undefined") {
-    localStorage.setItem("user", JSON.stringify(user))
+// Create encrypted JWT token
+async function createSessionToken(user: User): Promise<string> {
+  const token = await new jose.SignJWT({ 
+    id: user.id,
+    email: user.email,
+    name: user.name 
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setExpirationTime('24h')
+    .sign(JWT_SECRET)
+
+  return token
+}
+
+// Verify and decode JWT token
+async function verifySessionToken(token: string): Promise<User | null> {
+  try {
+    const { payload } = await jose.jwtVerify(token, JWT_SECRET)
+    return payload as User
+  } catch {
+    return null
   }
 }
 
-export function getUserSession(): User | null {
+// Encrypt data before storing in localStorage
+function encryptData(data: string): string {
+  return CryptoJS.AES.encrypt(data, ENCRYPTION_KEY).toString()
+}
+
+// Decrypt data from localStorage
+function decryptData(encryptedData: string): string {
+  const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY)
+  return bytes.toString(CryptoJS.enc.Utf8)
+}
+
+export async function setUserSession(user: User) {
   if (typeof window !== "undefined") {
-    const userStr = localStorage.getItem("user")
-    if (userStr) {
-      try {
-        return JSON.parse(userStr)
-      } catch {
-        return null
-      }
+    const token = await createSessionToken(user)
+    const encryptedToken = encryptData(token)
+    localStorage.setItem(STORAGE_KEY, encryptedToken)
+  }
+}
+
+export async function getUserSession(): Promise<User | null> {
+  if (typeof window !== "undefined") {
+    const encryptedToken = localStorage.getItem(STORAGE_KEY)
+    if (!encryptedToken) return null
+
+    try {
+      const token = decryptData(encryptedToken)
+      return await verifySessionToken(token)
+    } catch {
+      clearUserSession()
+      return null
     }
   }
   return null
@@ -65,6 +115,6 @@ export function getUserSession(): User | null {
 
 export function clearUserSession() {
   if (typeof window !== "undefined") {
-    localStorage.removeItem("user")
+    localStorage.removeItem(STORAGE_KEY)
   }
 }
