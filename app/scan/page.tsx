@@ -8,6 +8,7 @@ import { ArrowLeft, Camera } from "lucide-react"
 import { useAuth } from "@/hooks/use-auth"
 import type { Contact } from "@/types/contact"
 import { ContactsProvider, useContacts } from "@/hooks/use-contacts"
+import { toast } from "sonner"
 
 function ScanPageContent() {
   const router = useRouter()
@@ -23,9 +24,7 @@ function ScanPageContent() {
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
-    // Check if we're in the browser
     if (typeof window !== "undefined") {
-      // Check if the browser supports the camera API
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setError("Your browser doesn't support camera access")
         return
@@ -84,7 +83,7 @@ function ScanPageContent() {
 
     scanIntervalRef.current = setInterval(() => {
       scanFrame()
-    }, 500) // Scan every 500ms
+    }, 500)
   }
 
   const scanFrame = async () => {
@@ -100,27 +99,13 @@ function ScanPageContent() {
       return
     }
 
-    // Set canvas size to match video
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
-
-    // Draw video frame to canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-
-    try {
-      // Get image data from canvas
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-
-      // Try to detect QR code using a simple approach
-      // For now, we'll use a manual input as fallback
-      // In a real implementation, you'd use a QR detection library here
-    } catch (err) {
-      console.error("Scan error:", err)
-    }
   }
 
   const handleManualInput = () => {
-    const input = prompt("Enter QR code data manually (for testing):")
+    const input = prompt("Enter QR code data:")
     if (input) {
       handleQrDetected(input)
     }
@@ -136,15 +121,15 @@ function ScanPageContent() {
 
     try {
       const parsedData = parseQrData(data)
-      if (parsedData && parsedData.name) {
+      if (parsedData && (parsedData.name || parsedData.email || parsedData.phone)) {
         const newContact: Contact = {
           id: Date.now().toString(),
-          name: parsedData.name,
+          name: parsedData.name || "Unknown Contact",
           title: parsedData.title,
           company: parsedData.company,
           email: parsedData.email,
           phone: parsedData.phone,
-          socials: parsedData.socials,
+          socials: parsedData.socials || {},
           notes: parsedData.notes || "Added via QR code scan",
           metAt: parsedData.metAt || "QR Code Scan",
           date: new Date().toISOString(),
@@ -152,6 +137,7 @@ function ScanPageContent() {
 
         addContact(newContact)
         stopCamera()
+        toast.success("Contact added successfully!")
         router.push(`/contact/${newContact.id}`)
       } else {
         setError("Could not extract contact information from QR code")
@@ -167,132 +153,194 @@ function ScanPageContent() {
       return null
     }
 
-    console.log("Scanning QR data:", data)
-
-    // First priority: Check if it's a vCard format
+    // Try parsing as vCard
     if (data.startsWith("BEGIN:VCARD")) {
       return parseVCard(data)
     }
 
-    // Second priority: Try to parse as JSON (legacy format)
+    // Try parsing as MeCard (common in Japanese QR codes)
+    if (data.startsWith("MECARD:")) {
+      return parseMeCard(data)
+    }
+
+    // Try parsing as JSON
     try {
       if (data.trim().startsWith("{") && data.trim().endsWith("}")) {
         const jsonData = JSON.parse(data)
-        if (jsonData && jsonData.name) {
-          return {
-            name: jsonData.name,
-            title: jsonData.title || undefined,
-            company: jsonData.company || undefined,
-            email: jsonData.email || undefined,
-            phone: jsonData.phone || undefined,
-            socials: jsonData.socials || undefined,
-            metAt: "QR Code Scan",
-            notes: "Contact information from QR code",
-          }
+        return {
+          name: jsonData.name || jsonData.fn || jsonData.fullName,
+          title: jsonData.title || jsonData.jobTitle,
+          company: jsonData.company || jsonData.organization,
+          email: jsonData.email,
+          phone: jsonData.phone || jsonData.tel,
+          socials: jsonData.socials || {},
+          notes: jsonData.notes,
+          metAt: "QR Code Scan",
         }
       }
     } catch (e) {
       console.log("Not valid JSON, trying other formats")
     }
 
-    // Third priority: Check if it's a LinkedIn URL
-    if (data.includes("linkedin.com/in/")) {
-      const username = data.split("linkedin.com/in/")[1].split(/[/?#]/)[0]
-      return {
-        name: `LinkedIn: ${username}`,
-        notes: `LinkedIn profile: ${data}`,
-        socials: { linkedin: data },
-        metAt: "QR Code Scan",
-      }
-    }
-
-    // Fourth priority: Check if it's any social media URL
+    // Handle various URL formats
     if (data.startsWith("http")) {
-      let platform = "Website"
-      let name = "Web Contact"
-
-      if (data.includes("twitter.com") || data.includes("x.com")) {
-        platform = "Twitter/X"
-        name = "Twitter Contact"
-      } else if (data.includes("instagram.com")) {
-        platform = "Instagram"
-        name = "Instagram Contact"
-      } else if (data.includes("facebook.com")) {
-        platform = "Facebook"
-        name = "Facebook Contact"
+      const url = new URL(data)
+      const socialData: Partial<Contact> = {
+        metAt: "QR Code Scan",
+        notes: `Contact from ${url.hostname}`,
+        socials: {},
       }
 
+      // Handle common social media URLs
+      if (url.hostname.includes("linkedin.com")) {
+        socialData.socials!.linkedin = data
+        socialData.name = "LinkedIn Contact"
+      } else if (url.hostname.includes("twitter.com") || url.hostname.includes("x.com")) {
+        socialData.socials!.twitter = data
+        socialData.name = "Twitter Contact"
+      } else if (url.hostname.includes("instagram.com")) {
+        socialData.socials!.instagram = data
+        socialData.name = "Instagram Contact"
+      } else if (url.hostname.includes("facebook.com")) {
+        socialData.socials!.facebook = data
+        socialData.name = "Facebook Contact"
+      } else {
+        socialData.socials!.website = data
+        socialData.name = "Web Contact"
+      }
+
+      return socialData
+    }
+
+    // Handle email addresses
+    if (data.includes("@") && data.includes(".")) {
       return {
-        name: name,
-        notes: `${platform} profile: ${data}`,
-        socials: { [platform.toLowerCase()]: data },
+        name: "Email Contact",
+        email: data,
         metAt: "QR Code Scan",
       }
     }
 
-    // Last priority: Plain text
-    if (data.trim().length > 0) {
+    // Handle phone numbers
+    if (/^[+\d\s-()]+$/.test(data)) {
       return {
-        name: "Text Contact",
-        notes: data,
+        name: "Phone Contact",
+        phone: data,
         metAt: "QR Code Scan",
       }
     }
 
-    return null
+    // Handle plain text as notes
+    return {
+      name: "Text Note",
+      notes: data,
+      metAt: "QR Code Scan",
+    }
   }
 
   const parseVCard = (vcard: string): Partial<Contact> => {
-    if (!vcard || typeof vcard !== "string") {
-      return {}
-    }
-
-    const lines = vcard.split("\n").map((line) => line.trim())
+    const lines = vcard.split(/\r\n|\r|\n/).map((line) => line.trim())
     const contact: Partial<Contact> = {
       metAt: "QR Code Scan",
       notes: "Contact from vCard",
       socials: {},
     }
 
+    let currentKey = ""
+    let currentValue = ""
+
     lines.forEach((line) => {
-      if (!line || line === "BEGIN:VCARD" || line === "END:VCARD" || line.startsWith("VERSION:")) {
+      if (line.startsWith("BEGIN:") || line.startsWith("END:") || line.startsWith("VERSION:")) {
+        return
+      }
+
+      // Handle line continuations
+      if (line.startsWith(" ") && currentKey) {
+        currentValue += line.trim()
         return
       }
 
       const colonIndex = line.indexOf(":")
       if (colonIndex === -1) return
 
-      const key = line.substring(0, colonIndex)
-      const value = line.substring(colonIndex + 1)
+      currentKey = line.substring(0, colonIndex).split(";")[0]
+      currentValue = line.substring(colonIndex + 1)
 
+      switch (currentKey) {
+        case "FN":
+        case "N":
+          if (!contact.name) {
+            contact.name = currentValue.split(";")[0]
+          }
+          break
+        case "TITLE":
+          contact.title = currentValue
+          break
+        case "ORG":
+          contact.company = currentValue.split(";")[0]
+          break
+        case "EMAIL":
+          contact.email = currentValue
+          break
+        case "TEL":
+          contact.phone = currentValue
+          break
+        case "NOTE":
+          contact.notes = currentValue
+          break
+        case "URL":
+          if (!contact.socials) contact.socials = {}
+          const urlType = line.toLowerCase().includes("linkedin")
+            ? "linkedin"
+            : line.toLowerCase().includes("twitter") || line.toLowerCase().includes("x.com")
+            ? "twitter"
+            : line.toLowerCase().includes("instagram")
+            ? "instagram"
+            : line.toLowerCase().includes("facebook")
+            ? "facebook"
+            : "website"
+          contact.socials[urlType] = currentValue
+          break
+      }
+    })
+
+    return contact
+  }
+
+  const parseMeCard = (mecard: string): Partial<Contact> => {
+    const contact: Partial<Contact> = {
+      metAt: "QR Code Scan",
+      notes: "Contact from MeCard",
+      socials: {},
+    }
+
+    const fields = mecard.substring(7).split(";")
+    fields.forEach((field) => {
+      const [key, value] = field.split(":", 2)
       if (!value) return
 
       switch (key) {
-        case "FN":
-          contact.name = value
-          break
-        case "TITLE":
-          contact.title = value
-          break
-        case "ORG":
-          contact.company = value
-          break
-        case "EMAIL":
-          contact.email = value
+        case "N":
+          contact.name = value.replace(",", " ")
           break
         case "TEL":
           contact.phone = value
           break
+        case "EMAIL":
+          contact.email = value
+          break
+        case "ORG":
+          contact.company = value
+          break
+        case "TITLE":
+          contact.title = value
+          break
+        case "URL":
+          if (!contact.socials) contact.socials = {}
+          contact.socials.website = value
+          break
         case "NOTE":
           contact.notes = value
-          break
-        default:
-          if (key.startsWith("URL")) {
-            const typeMatch = key.match(/type=([^;]+)/)
-            const platform = typeMatch ? typeMatch[1] : "website"
-            if (!contact.socials) contact.socials = {}
-            contact.socials[platform] = value
-          }
           break
       }
     })
@@ -334,7 +382,6 @@ function ScanPageContent() {
                 <video ref={videoRef} className="w-full h-64 object-cover" autoPlay playsInline muted />
                 <canvas ref={canvasRef} className="hidden" />
 
-                {/* Scanning overlay */}
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="w-48 h-48 border-2 border-white border-dashed rounded-lg opacity-50"></div>
                 </div>
@@ -350,7 +397,6 @@ function ScanPageContent() {
                 Position the QR code within the frame to scan and add the contact
               </p>
 
-              {/* Manual input for testing */}
               <Button onClick={handleManualInput} variant="outline" className="w-full">
                 <Camera className="h-4 w-4 mr-2" />
                 Manual Input (for testing)
