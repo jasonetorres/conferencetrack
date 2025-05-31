@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useRef } from "react"
 import QRCode from "react-qr-code"
 import { Button } from "@/components/ui/button"
@@ -87,20 +86,39 @@ export default function QrCodeGenerator() {
 
   const downloadQRCode = () => {
     if (qrContainerRef.current) {
+      // Create a canvas element
       const canvas = document.createElement("canvas")
       const ctx = canvas.getContext("2d")
       if (!ctx) return
 
-      canvas.width = 400
-      canvas.height = 600
+      // Set canvas size to match the QR container
+      const qrContainer = qrContainerRef.current
+      const containerWidth = qrContainer.offsetWidth
+      const containerHeight = qrContainer.offsetHeight
 
+      canvas.width = containerWidth * 2 // Double size for better quality
+      canvas.height = containerHeight * 2
+
+      // Draw background
+      ctx.scale(2, 2) // Scale up for better quality
       ctx.fillStyle = qrSettings.pageBackgroundColor
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillRect(0, 0, containerWidth, containerHeight)
 
-      const link = document.createElement("a")
-      link.download = "my-qr-code.png"
-      link.href = canvas.toDataURL()
-      link.click()
+      // Convert the QR code and container to an image
+      const svgData = new XMLSerializer().serializeToString(qrContainer.querySelector('svg'))
+      const img = new Image()
+      img.src = 'data:image/svg+xml;base64,' + btoa(svgData)
+
+      img.onload = () => {
+        // Draw the QR code
+        ctx.drawImage(img, 0, 0, containerWidth, containerHeight)
+
+        // Convert to PNG and download
+        const link = document.createElement("a")
+        link.download = "my-qr-code.png"
+        link.href = canvas.toDataURL("image/png")
+        link.click()
+      }
     }
   }
 
@@ -654,7 +672,7 @@ export default function QrCodeGenerator() {
             </Card>
 
             <p
-              className="text-xs text-center mt-3 transition-all duration-300 max-w-sm"
+              className="text-sm text-center mt-6 transition-all duration-300"
               style={{
                 color: qrSettings.textColor,
                 opacity: 0.7,
