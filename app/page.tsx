@@ -17,32 +17,40 @@ export default function Home() {
       <ProfileProvider>
         <ContactsProvider>
           <QrSettingsProvider>
-            <main className="container mx-auto px-4 py-6 max-w-md">
-              <div className="flex justify-between items-center mb-6">
-                <h1 className="text-2xl font-bold">Conference Contact Tracker</h1>
-                <UserMenu />
+            <main className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4 sm:px-6 lg:px-8">
+              <div className="max-w-4xl mx-auto">
+                <div className="flex justify-between items-center mb-8">
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                    Conference Contact Tracker
+                  </h1>
+                  <UserMenu />
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+                  <Tabs defaultValue="myqr" className="w-full">
+                    <TabsList className="w-full border-b border-gray-200 dark:border-gray-700">
+                      <TabsTrigger value="myqr" className="flex-1 py-4">My QR</TabsTrigger>
+                      <TabsTrigger value="contacts" className="flex-1 py-4">Contacts</TabsTrigger>
+                      <TabsTrigger value="profile" className="flex-1 py-4">Profile</TabsTrigger>
+                    </TabsList>
+
+                    <div className="p-6">
+                      <TabsContent value="myqr">
+                        <QrCodeGenerator />
+                      </TabsContent>
+
+                      <TabsContent value="contacts">
+                        <ContactsList />
+                      </TabsContent>
+
+                      <TabsContent value="profile" className="space-y-8">
+                        <ProfileSettings />
+                        <HomeScreenInstructions />
+                      </TabsContent>
+                    </div>
+                  </Tabs>
+                </div>
               </div>
-
-              <Tabs defaultValue="myqr" className="w-full">
-                <TabsList className="grid grid-cols-3 w-full">
-                  <TabsTrigger value="myqr">My QR</TabsTrigger>
-                  <TabsTrigger value="contacts">Contacts</TabsTrigger>
-                  <TabsTrigger value="profile">Profile</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="myqr" className="mt-4">
-                  <QrCodeGenerator />
-                </TabsContent>
-
-                <TabsContent value="contacts" className="mt-4">
-                  <ContactsList />
-                </TabsContent>
-
-                <TabsContent value="profile" className="mt-4 space-y-6">
-                  <ProfileSettings />
-                  <HomeScreenInstructions />
-                </TabsContent>
-              </Tabs>
             </main>
           </QrSettingsProvider>
         </ContactsProvider>
